@@ -1,0 +1,14 @@
+# 개인 메모·계획서
+local-notes/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# MediaPipe 모델 (README의 다운로드 명령으로 받음)
+models/*.task
+
+# macOS
+.DS_Store

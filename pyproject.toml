@@ -1,0 +1,16 @@
+[project]
+name = "kkaddak"
+version = "0.1.0"
+description = "Camera hand-gesture virtual trackpad for macOS"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mediapipe>=1.2.0",
+    "numpy>=2.5.4",
+    "opencv-python>=5.0.0.93",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
