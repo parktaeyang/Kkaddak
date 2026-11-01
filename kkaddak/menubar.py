@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -179,14 +180,23 @@ class KkaddakApp(rumps.App):
         if bundle is None:
             rumps.alert("재시작", "앱(.app)으로 실행할 때만 재시작할 수 있습니다. 터미널에서 다시 실행해 주세요.")
             return
-        # 현재 프로세스가 끝난 뒤 새로 띄우도록 잠시 기다렸다가 open 한다
-        subprocess.Popen(["/bin/sh", "-c", f'sleep 1; open "{bundle}"'])
+        # 실행 중인 앱에 open을 하면 새로 뜨지 않고 기존 창만 활성화되므로, 이 프로세스가
+        # 완전히 끝날 때까지 기다렸다가 연다. 앱 종료 시 함께 정리되지 않도록 별도 세션에서 실행한다.
+        log.info("재시작")
+        subprocess.Popen(
+            ["/bin/sh", "-c", 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; open "$2"', "restart", str(os.getpid()), bundle],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         self.on_quit(None)
 
     def on_quit(self, _sender) -> None:
         self._stop.set()
         self._enabled.set()  # 대기 중인 워커를 깨워 종료시킴
         self._worker.join(timeout=2)
+        log.info("종료")
         rumps.quit_application()
 
     # ---- 상태 갱신 (메인 스레드) ----
