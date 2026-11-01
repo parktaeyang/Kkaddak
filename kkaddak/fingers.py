@@ -120,3 +120,27 @@ def bbox_iou(a: Sequence[Sequence[float]], b: Sequence[Sequence[float]]) -> floa
     area = lambda p: float(np.prod(p.max(axis=0) - p.min(axis=0)))  # noqa: E731
     union = area(pa) + area(pb) - inter
     return inter / union if union > 0 else 0.0
+
+
+def pointing_direction(
+    state: FingerState,
+    image_points: Sequence[Sequence[float]],
+    width: int,
+    height: int,
+    max_angle_deg: float = 35.0,
+    min_length_ratio: float = 0.3,
+) -> str | None:
+    """검지만 펴고 옆을 가리키면 "left"/"right", 아니면 None. 방향은 (거울 모드) 화면 기준.
+
+    검지 MCP→TIP 벡터가 수평에서 max_angle_deg 이내여야 하고, 카메라 쪽을 가리켜 짧게 보이는
+    경우를 거르기 위해 길이가 손 크기의 min_length_ratio 이상이어야 한다.
+    """
+    if not state.extended[1] or any(state.extended[2:]):
+        return None
+    p = np.asarray(image_points, dtype=float)[:, :2] * (width, height)
+    dx, dy = p[INDEX[3]] - p[INDEX[0]]
+    if np.hypot(dx, dy) < min_length_ratio * hand_size_px(image_points, width, height):
+        return None
+    if np.degrees(np.arctan2(abs(dy), abs(dx))) > max_angle_deg:
+        return None
+    return "left" if dx < 0 else "right"

@@ -77,10 +77,19 @@ def request_key_permission() -> bool:
     return bool(Quartz.CGRequestPostEventAccess())
 
 
-def press(combo: keys.KeyCombo) -> None:
+def _can_post(combo: keys.KeyCombo) -> bool:
+    global blocked_key_presses
+    if has_key_permission():
+        return True
+    blocked_key_presses += 1
+    log.warning("손쉬운 사용 권한이 없어 키 입력을 보낼 수 없습니다: %s", combo.label)
+    return False
+
+
+def _post(combo: keys.KeyCombo, down: bool) -> None:
     import Quartz
 
-    global _MODIFIER_FLAGS, blocked_key_presses
+    global _MODIFIER_FLAGS
     if _MODIFIER_FLAGS is None:
         _MODIFIER_FLAGS = {
             "ctrl": Quartz.kCGEventFlagMaskControl,
@@ -88,17 +97,33 @@ def press(combo: keys.KeyCombo) -> None:
             "shift": Quartz.kCGEventFlagMaskShift,
             "cmd": Quartz.kCGEventFlagMaskCommand,
         }
-    if not has_key_permission():
-        blocked_key_presses += 1
-        log.warning("손쉬운 사용 권한이 없어 키 입력을 보낼 수 없습니다: %s", combo.label)
-        return
-
     flags = 0
     for m in combo.modifiers:
         flags |= _MODIFIER_FLAGS[m]
     src = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
-    for down in (True, False):
-        ev = Quartz.CGEventCreateKeyboardEvent(src, combo.keycode, down)
-        Quartz.CGEventSetFlags(ev, flags)
-        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+    ev = Quartz.CGEventCreateKeyboardEvent(src, combo.keycode, down)
+    Quartz.CGEventSetFlags(ev, flags)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+
+
+def press(combo: keys.KeyCombo) -> None:
+    """키를 눌렀다 바로 뗀다. 매 프레임 키 상태를 확인하는 게임은 놓칠 수 있어 key_down/key_up을 쓴다."""
+    if not _can_post(combo):
+        return
+    _post(combo, True)
+    _post(combo, False)
     log.info("키 입력 %s", combo.label)
+
+
+def key_down(combo: keys.KeyCombo) -> bool:
+    """키를 누른 상태로 둔다. 보냈으면 True — 반드시 key_up으로 떼야 한다."""
+    if not _can_post(combo):
+        return False
+    _post(combo, True)
+    log.info("키 누름 %s", combo.label)
+    return True
+
+
+def key_up(combo: keys.KeyCombo) -> None:
+    _post(combo, False)
+    log.info("키 뗌 %s", combo.label)

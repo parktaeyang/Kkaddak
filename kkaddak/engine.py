@@ -17,9 +17,17 @@ import mediapipe as mp
 import numpy as np
 from mediapipe.tasks.python import BaseOptions, vision
 
-from kkaddak import actions
+from kkaddak import actions, keys
 from kkaddak.config import DEFAULT_BINDINGS, GESTURES, Bindings
-from kkaddak.fingers import FingerState, bbox_iou, classify, hand_size_px, is_fist, is_upright
+from kkaddak.fingers import (
+    FingerState,
+    bbox_iou,
+    classify,
+    hand_size_px,
+    is_fist,
+    is_upright,
+    pointing_direction,
+)
 from kkaddak.gesture import HoldConfig, HoldTrigger, PushDetector
 
 
@@ -36,6 +44,12 @@ CAMERA_PROMPT_TIMEOUT_S = 120
 DUPLICATE_IOU = 0.5  # 두 손의 영역이 이 이상 겹치면 같은 손을 중복 인식한 것으로 본다
 HANDS = ("Right", "Left")  # MediaPipe handedness 라벨 (거울 모드 입력 기준 사용자의 실제 손)
 PUSH_GESTURE = {"Right": "push_right", "Left": "push_left"}
+POINT_GESTURE = {"left": "point_left", "right": "point_right"}
+# 가리키기는 손바닥보다 짧게 유지해도 발동하고, 빨리 재무장된다
+POINT_HOLD = HoldConfig(hold_ms=300, dropout_ms=150, release_ms=250, cooldown_ms=500)
+# 가리키기에 키 입력을 매핑하면 가리키는 동안 키를 누르고 있는다 (게임은 매 프레임 키 상태를 확인하므로).
+# 이 시간 이상 가리키는 자세가 안 보이면 뗀다. 짧은 인식 끊김에 키가 떨어졌다 다시 눌리지 않게 한다.
+POINT_RELEASE_MS = 150
 log = logging.getLogger(__name__)
 
 
@@ -88,6 +102,7 @@ class HandObs:
     image_pts: list[tuple[float, float, float]]
     state: FingerState
     size_px: float
+    pointing: str | None  # "left" / "right" / None
 
 
 @dataclass(frozen=True)
@@ -113,6 +128,9 @@ class Engine:
         self.bindings: Bindings = dict(bindings or DEFAULT_BINDINGS)
         self.trigger = HoldTrigger(HoldConfig(hold_ms=cfg.hold_ms))
         self.push = {hand: PushDetector() for hand in HANDS}
+        self.point = {direction: HoldTrigger(POINT_HOLD) for direction in POINT_GESTURE}
+        self._point_seen: dict[str, int] = {}
+        self._held: dict[str, tuple[actions.Action, keys.KeyCombo]] = {}  # 누르고 있는 키 (제스처 id → 동작, 키)
         self._cap: cv2.VideoCapture | None = None
         self._landmarker: vision.HandLandmarker | None = None
         self._last_ts = -1
@@ -163,9 +181,15 @@ class Engine:
         if self._landmarker is not None:
             self._landmarker.close()
             self._landmarker = None
+        self._reset_detectors()
+
+    def _reset_detectors(self) -> None:
+        self.release_keys()
         self.trigger.reset()
         for detector in self.push.values():
             detector.reset()
+        for trigger in self.point.values():
+            trigger.reset()
 
     def step(self) -> StepResult:
         assert self._cap is not None and self._landmarker is not None, "open() 먼저 호출"
@@ -178,9 +202,7 @@ class Engine:
             self._fail_count += 1
             if self._fail_count > MAX_READ_FAILURES:
                 raise CameraError("카메라 프레임을 읽지 못했습니다. 다른 앱이 카메라를 사용 중인지 확인하세요.")
-            self.trigger.reset()
-            for detector in self.push.values():
-                detector.reset()
+            self._reset_detectors()
             return StepResult(now_ms, None, [], [])
         self._fail_count = 0
 
@@ -194,11 +216,21 @@ class Engine:
             image_pts = [(lm.x, lm.y, lm.z) for lm in lms]
             state = classify([(lm.x, lm.y, lm.z) for lm in world])
             top = handedness[0]
-            hands.append(HandObs(top.category_name, top.score, image_pts, state, hand_size_px(image_pts, w, h)))
+            hands.append(
+                HandObs(
+                    top.category_name,
+                    top.score,
+                    image_pts,
+                    state,
+                    hand_size_px(image_pts, w, h),
+                    pointing_direction(state, image_pts, w, h),
+                )
+            )
             log.debug("%s fingers=%s bends=%s", top.category_name, state.extended, [round(b) for b in state.bends])
         if len(hands) > 1:
             hands = dedupe_hands(hands)
 
+        bindings = self.bindings
         events: list[str] = []
         palm = any(
             hand.state.is_open_palm and (not self.cfg.require_upright or is_upright(hand.image_pts)) for hand in hands
@@ -212,12 +244,61 @@ class Engine:
             if detector.update(now_ms, max(fists) if fists else None):
                 events.append(PUSH_GESTURE[label])
 
-        bindings = self.bindings
+        events += self._update_pointing(now_ms, hands, bindings)
+        self._dispatch(events, bindings)
+        return StepResult(now_ms, frame, hands, events)
+
+    def _update_pointing(self, now_ms: int, hands: list[HandObs], bindings: Bindings) -> list[str]:
+        """가리키기 발동 제스처를 반환하고, 가리키기를 멈췄거나 설정이 바뀐 제스처의 키를 뗀다."""
+        events: list[str] = []
+        for direction, trigger in self.point.items():
+            gesture = POINT_GESTURE[direction]
+            active = any(hand.pointing == direction for hand in hands)
+            if active:
+                self._point_seen[gesture] = now_ms
+            if trigger.update(now_ms, active):
+                events.append(gesture)
+            elif gesture in self._held and (
+                now_ms - self._point_seen.get(gesture, now_ms) > POINT_RELEASE_MS
+                or bindings.get(gesture) != self._held[gesture][0]
+            ):
+                self._release(gesture)
+        return events
+
+    def _dispatch(self, events: list[str], bindings: Bindings) -> None:
         for gesture in events:
             action = bindings.get(gesture, {"type": "none"})
             log.info("제스처 %s → %s", GESTURES[gesture], actions.describe(action))
             try:
-                actions.perform(action, dry_run=self.cfg.dry_run)
+                if gesture in POINT_GESTURE.values() and action["type"] == "key":
+                    self._hold(gesture, action)
+                else:
+                    actions.perform(action, dry_run=self.cfg.dry_run)
             except Exception:
                 log.exception("동작 실행 실패: %s", action)
-        return StepResult(now_ms, frame, hands, events)
+
+    def _hold(self, gesture: str, action: actions.Action) -> None:
+        self._release(gesture)
+        combo = keys.parse(action["key"])
+        if self.cfg.dry_run:
+            log.info("[dry-run] 키 누름 %s", combo.label)
+        elif not actions.key_down(combo):
+            return
+        self._held[gesture] = (action, combo)
+
+    def _release(self, gesture: str) -> None:
+        held = self._held.pop(gesture, None)
+        if held is None:
+            return
+        if self.cfg.dry_run:
+            log.info("[dry-run] 키 뗌 %s", held[1].label)
+        else:
+            actions.key_up(held[1])
+
+    def release_keys(self) -> None:
+        """누르고 있는 키를 모두 뗀다. 카메라를 끄거나 인식이 끊길 때 키가 눌린 채 남지 않게 한다."""
+        for gesture in list(self._held):
+            try:
+                self._release(gesture)
+            except Exception:
+                log.exception("키 떼기 실패: %s", gesture)

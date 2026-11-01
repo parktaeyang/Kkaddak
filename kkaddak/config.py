@@ -23,12 +23,16 @@ GESTURES: dict[str, str] = {
     "palm": "손바닥 들기",
     "push_right": "오른손 주먹 밀기",
     "push_left": "왼손 주먹 밀기",
+    "point_left": "왼쪽 가리키기",
+    "point_right": "오른쪽 가리키기",
 }
 
 DEFAULT_BINDINGS: dict[str, actions.Action] = {
     "palm": {"type": "mission_control"},
     "push_right": {"type": "key", "key": "s"},
     "push_left": {"type": "key", "key": "a"},
+    "point_left": {"type": "key", "key": "left"},
+    "point_right": {"type": "key", "key": "right"},
 }
 
 Bindings = dict[str, actions.Action]

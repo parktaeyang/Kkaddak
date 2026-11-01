@@ -65,7 +65,7 @@ def draw_overlay(frame, r: StepResult, engine: Engine, fps: float, recent: list[
         for x, y, _ in hand.image_pts:
             cv2.circle(frame, (int(x * w), int(y * h)), 3, color, -1)
         flags = " ".join(f"{n[0].upper() if e else '.'}" for n, e in zip(FINGER_NAMES, hand.state.extended))
-        text = f"{hand.label:<5} {hand.state.count} [{flags}] {hand.size_px:3.0f}px"
+        text = f"{hand.label:<5} {hand.state.count} [{flags}] {hand.size_px:3.0f}px {hand.pointing or ''}"
         cv2.putText(frame, text, (10, 25 + 28 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
     color = {Phase.ARMED: (200, 200, 200), Phase.HOLDING: (0, 200, 255), Phase.LATCHED: (0, 255, 0)}[trigger.phase]
     cv2.putText(frame, f"palm {trigger.phase.value}  {fps:4.1f}fps", (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
