@@ -1,23 +1,47 @@
 # kkaddak
 
-맥북 카메라로 손 제스처를 인식해 macOS를 조작하는 가상 트랙패드.
+맥북 카메라로 손 제스처를 인식해 macOS를 조작하는 메뉴바 앱.
 
-## 현재 기능 (M1)
-손바닥(다섯 손가락)을 펴서 들어 올리고 0.5초 유지 → **Mission Control** 실행
+## 제스처와 기본 동작
 
-## 실행
+| 제스처 | 기본 동작 |
+|---|---|
+| 손바닥 들기 (다섯 손가락을 펴서 위로 들고 0.5초 유지) | Mission Control |
+| 오른손 주먹 밀기 (주먹을 쥐고 카메라 쪽으로 빠르게 내밀기) | `S` 키 입력 |
+| 왼손 주먹 밀기 | `A` 키 입력 |
+
+메뉴바 아이콘 > **제스처 설정**에서 제스처마다 동작을 바꿀 수 있습니다.
+- `Mission Control` / `키 입력…` / `동작 없음`
+- 키 입력 예: `s`, `shift+s`, `cmd+space`, `ctrl+up`, `f5`, `esc`
+- 설정은 `~/Library/Application Support/kkaddak/config.json`에 저장됩니다.
+
+키 입력은 실제 키보드의 키를 누르는 방식이라, 한글 입력 상태에서는 `s`가 `ㄴ`으로 입력됩니다.
+
+## 앱 빌드 (독립 실행형)
+```bash
+./scripts/build_app.sh        # → dist/Kkaddak.app
+```
+`dist/Kkaddak.app`을 `/Applications`로 옮겨 더블클릭하면 실행됩니다. 처음 실행하면 다음 두 가지 권한을 허용해야 합니다.
+- **카메라**: 실행 시 표시되는 허용 창
+- **손쉬운 사용** (키 입력에 필요): 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 Kkaddak 허용
+
+앱을 다시 빌드하면 서명이 바뀌어 권한을 다시 허용해야 할 수 있습니다. 로그는 `~/Library/Logs/kkaddak/kkaddak.log`에 남습니다.
+
+> 현재는 개발용 ad-hoc 서명입니다. 다른 사람에게 배포하려면 Apple Developer ID로 서명하고 공증(notarization)을 받아야 Gatekeeper 경고 없이 실행됩니다. Apple Silicon(arm64) 전용입니다.
+
+## 개발 실행
 ```bash
 uv sync
 curl -L --create-dirs -o models/hand_landmarker.task \
   https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
-uv run python -m kkaddak                       # 메뉴바 앱으로 실행
-uv run python -m kkaddak --preview --dry-run   # 개발용: 미리보기 창 + 로그만 (동작 실행 안 함)
+uv run python -m kkaddak                       # 메뉴바 앱
+uv run python -m kkaddak --preview --dry-run   # 미리보기 창 + 로그만 (동작 실행 안 함)
 uv run pytest                                  # 테스트
 ```
-옵션: `--headless` (아이콘·창 없이 터미널에서만), `--hold-ms 500` (유지 시간), `--no-upright` (손 세움 조건 끄기), `-v` (손가락별 굽힘 각도 로그)
+옵션: `--headless` (아이콘·창 없이 터미널에서만), `--hold-ms 500` (손바닥 유지 시간), `--no-upright` (손 세움 조건 끄기), `-v` (손가락별 굽힘 각도 로그)
 
-기본 실행 시 메뉴바에 손 아이콘이 생깁니다.
-- ✋ 인식 중 / 채워진 ✋ 손바닥 감지·발동 / 사선 그어진 손 꺼짐(카메라 해제)
-- 아이콘 메뉴에서 켜기/끄기, 종료
+미리보기 창에는 손마다 `Right`/`Left`, 펴진 손가락, 손 크기(px)가 표시됩니다. 오른손·왼손이 반대로 표시되면 알려주세요.
 
-처음 실행하면 터미널 앱에 카메라 권한을 요청합니다. `--preview`/`--headless` 모드는 미리보기 창에서 `q`/`ESC` 또는 `Ctrl+C`로 종료합니다.
+## 제스처·동작 추가 방법
+- 제스처: `kkaddak/config.py`의 `GESTURES`·`DEFAULT_BINDINGS`에 등록 → `kkaddak/engine.py`에서 해당 id로 이벤트 발생
+- 동작: `kkaddak/actions.py`의 `ACTION_TYPES`에 등록 → `perform()`/`describe()`에 분기 추가

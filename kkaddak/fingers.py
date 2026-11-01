@@ -97,3 +97,26 @@ def is_upright(image_points: Sequence[Sequence[float]]) -> bool:
     """영상 좌표에서 손끝이 손목보다 위(손을 들어 올린 자세)인지. y는 아래로 증가."""
     p = np.asarray(image_points, dtype=float)
     return bool(p[MIDDLE[3], 1] < p[WRIST, 1] and p[MIDDLE[0], 1] < p[WRIST, 1])
+
+
+def is_fist(state: FingerState) -> bool:
+    """검지~새끼가 모두 접힘 (엄지는 감싸든 펴든 무관)."""
+    return not any(state.extended[1:])
+
+
+def hand_size_px(image_points: Sequence[Sequence[float]], width: int, height: int) -> float:
+    """영상에서 손이 차지하는 크기(px). 바운딩 박스 넓이의 제곱근으로, 손이 돌아가도 비교적 안정적."""
+    p = np.asarray(image_points, dtype=float)[:, :2] * (width, height)
+    w, h = p.max(axis=0) - p.min(axis=0)
+    return float(np.sqrt(max(w, 1.0) * max(h, 1.0)))
+
+
+def bbox_iou(a: Sequence[Sequence[float]], b: Sequence[Sequence[float]]) -> float:
+    """두 손 랜드마크의 바운딩 박스 겹침 비율(IoU, 0~1). 정규화 좌표 그대로 써도 비율은 같다."""
+    pa, pb = np.asarray(a, dtype=float)[:, :2], np.asarray(b, dtype=float)[:, :2]
+    lo = np.maximum(pa.min(axis=0), pb.min(axis=0))
+    hi = np.minimum(pa.max(axis=0), pb.max(axis=0))
+    inter = float(np.prod(np.clip(hi - lo, 0, None)))
+    area = lambda p: float(np.prod(p.max(axis=0) - p.min(axis=0)))  # noqa: E731
+    union = area(pa) + area(pb) - inter
+    return inter / union if union > 0 else 0.0

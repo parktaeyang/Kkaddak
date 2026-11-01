@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from kkaddak.fingers import classify, is_upright
+from kkaddak.fingers import bbox_iou, classify, is_upright
 from tests.handgen import FIST, OPEN, make_hand
 
 
@@ -66,3 +66,12 @@ def test_upright():
     assert is_upright(img)
     img[[9, 12], 1] = (0.9, 0.95)  # 손끝이 아래를 향함
     assert not is_upright(img)
+
+
+def test_bbox_iou():
+    a = np.zeros((21, 3))
+    a[:, :2] = np.random.default_rng(0).uniform(0.2, 0.4, (21, 2))
+    assert bbox_iou(a, a) == pytest.approx(1.0)
+    b = a.copy()
+    b[:, 0] += 0.5  # 완전히 떨어진 손
+    assert bbox_iou(a, b) == 0.0
