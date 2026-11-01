@@ -8,6 +8,7 @@ dependencies = [
     "mediapipe>=1.2.0",
     "numpy>=2.5.4",
     "opencv-python>=5.0.0.93",
+    "rumps>=0.4.0",
 ]
 
 [dependency-groups]
