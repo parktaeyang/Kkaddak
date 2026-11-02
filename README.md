@@ -28,6 +28,7 @@
 ## 앱 빌드 (독립 실행형)
 ```bash
 ./scripts/build_app.sh        # → dist/Kkaddak.app
+./scripts/build_dmg.sh        # → dist/Kkaddak.dmg (배포용, https://github.com/parktaeyang/kkaddak-releases 에 업로드)
 ```
 `dist/Kkaddak.app`을 `/Applications`로 옮겨 더블클릭하면 실행됩니다. 처음 실행하면 다음 두 가지 권한을 허용해야 합니다.
 - **카메라**: 실행 시 표시되는 허용 창

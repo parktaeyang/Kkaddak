@@ -5,7 +5,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.2.0"
+VERSION = "1.0.0"
 BUNDLE_ID = "com.parktaeyang.kkaddak"
 
 a = Analysis(
