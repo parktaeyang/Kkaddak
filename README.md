@@ -33,6 +33,8 @@
 - **카메라**: 실행 시 표시되는 허용 창
 - **손쉬운 사용** (키 입력에 필요): 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 Kkaddak 허용
 
+앱 아이콘(`assets/Kkaddak.icns`)은 `uv run --with pillow python scripts/make_icon.py`로 다시 만들 수 있습니다.
+
 앱을 다시 빌드하면 서명이 바뀌어 권한을 다시 허용해야 할 수 있습니다. 로그는 `~/Library/Logs/kkaddak/kkaddak.log`에 남습니다.
 
 > 현재는 개발용 ad-hoc 서명입니다. 다른 사람에게 배포하려면 Apple Developer ID로 서명하고 공증(notarization)을 받아야 Gatekeeper 경고 없이 실행됩니다. Apple Silicon(arm64) 전용입니다.

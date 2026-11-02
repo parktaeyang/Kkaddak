@@ -31,6 +31,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name="Kkaddak")
 app = BUNDLE(
     coll,
     name="Kkaddak.app",
+    icon=str(ROOT / "assets" / "Kkaddak.icns"),  # 생성: scripts/make_icon.py
     bundle_identifier=BUNDLE_ID,
     version=VERSION,
     info_plist={
