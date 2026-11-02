@@ -127,20 +127,25 @@ def pointing_direction(
     image_points: Sequence[Sequence[float]],
     width: int,
     height: int,
+    fingers: int = 1,
     max_angle_deg: float = 35.0,
     min_length_ratio: float = 0.3,
 ) -> str | None:
-    """검지만 펴고 옆을 가리키면 "left"/"right", 아니면 None. 방향은 (거울 모드) 화면 기준.
+    """가리키는 방향 "left"/"right"/"up"/"down", 아니면 None. 방향은 (거울 모드) 화면 기준.
 
-    검지 MCP→TIP 벡터가 수평에서 max_angle_deg 이내여야 하고, 카메라 쪽을 가리켜 짧게 보이는
-    경우를 거르기 위해 길이가 손 크기의 min_length_ratio 이상이어야 한다.
+    fingers=1이면 검지만, 2이면 검지·중지만 편 손(엄지는 무관)을 본다. 두 손가락은 두 MCP→TIP 벡터의
+    평균 방향을 쓴다. 벡터가 수평 또는 수직에서 max_angle_deg 이내여야 하고(대각선은 무시), 카메라 쪽을
+    가리켜 짧게 보이는 경우를 거르기 위해 길이가 손 크기의 min_length_ratio 이상이어야 한다.
     """
-    if not state.extended[1] or any(state.extended[2:]):
+    if state.extended[1:] != (True,) * fingers + (False,) * (4 - fingers):
         return None
     p = np.asarray(image_points, dtype=float)[:, :2] * (width, height)
-    dx, dy = p[INDEX[3]] - p[INDEX[0]]
+    dx, dy = np.mean([p[f[3]] - p[f[0]] for f in (INDEX, MIDDLE)[:fingers]], axis=0)
     if np.hypot(dx, dy) < min_length_ratio * hand_size_px(image_points, width, height):
         return None
-    if np.degrees(np.arctan2(abs(dy), abs(dx))) > max_angle_deg:
-        return None
-    return "left" if dx < 0 else "right"
+    angle = np.degrees(np.arctan2(abs(dy), abs(dx)))  # 0=수평, 90=수직
+    if angle <= max_angle_deg:
+        return "left" if dx < 0 else "right"
+    if angle >= 90 - max_angle_deg:
+        return "up" if dy < 0 else "down"  # 이미지 y축은 아래가 +
+    return None

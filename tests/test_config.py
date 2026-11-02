@@ -9,7 +9,7 @@ def test_missing_file_uses_defaults(tmp_path):
 
 def test_defaults():
     d = config.DEFAULT_BINDINGS
-    assert d["palm"] == {"type": "mission_control"}
+    assert d["palm"] == {"type": "key", "key": "space"}
     assert d["push_right"] == {"type": "key", "key": "s"}
     assert d["push_left"] == {"type": "key", "key": "a"}
 

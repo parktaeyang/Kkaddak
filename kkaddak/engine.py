@@ -44,12 +44,14 @@ CAMERA_PROMPT_TIMEOUT_S = 120
 DUPLICATE_IOU = 0.5  # 두 손의 영역이 이 이상 겹치면 같은 손을 중복 인식한 것으로 본다
 HANDS = ("Right", "Left")  # MediaPipe handedness 라벨 (거울 모드 입력 기준 사용자의 실제 손)
 PUSH_GESTURE = {"Right": "push_right", "Left": "push_left"}
-POINT_GESTURE = {"left": "point_left", "right": "point_right"}
+POINT_GESTURE = {"left": "point_left", "right": "point_right", "up": "point_up", "down": "point_down"}
+TWO_POINT_GESTURE = {"up": "two_up", "down": "two_down"}  # 두 손가락은 위/아래만
 # 가리키기는 손바닥보다 짧게 유지해도 발동하고, 빨리 재무장된다
 POINT_HOLD = HoldConfig(hold_ms=300, dropout_ms=150, release_ms=250, cooldown_ms=500)
-# 가리키기에 키 입력을 매핑하면 가리키는 동안 키를 누르고 있는다 (게임은 매 프레임 키 상태를 확인하므로).
-# 이 시간 이상 가리키는 자세가 안 보이면 뗀다. 짧은 인식 끊김에 키가 떨어졌다 다시 눌리지 않게 한다.
-POINT_RELEASE_MS = 150
+# 자세를 유지하는 제스처(손바닥·가리키기)에 키 입력을 매핑하면 자세를 유지하는 동안 키를 누르고 있는다
+# (게임은 매 프레임 키 상태를 확인하므로). 이 시간 이상 자세가 안 보이면 뗀다.
+# 짧은 인식 끊김에 키가 떨어졌다 다시 눌리지 않게 한다.
+POSE_RELEASE_MS = 150
 log = logging.getLogger(__name__)
 
 
@@ -102,7 +104,8 @@ class HandObs:
     image_pts: list[tuple[float, float, float]]
     state: FingerState
     size_px: float
-    pointing: str | None  # "left" / "right" / None
+    pointing: str | None  # 검지로 가리키는 방향 "left" / "right" / "up" / "down" / None
+    two_pointing: str | None = None  # 검지·중지로 가리키는 방향
 
 
 @dataclass(frozen=True)
@@ -128,8 +131,13 @@ class Engine:
         self.bindings: Bindings = dict(bindings or DEFAULT_BINDINGS)
         self.trigger = HoldTrigger(HoldConfig(hold_ms=cfg.hold_ms))
         self.push = {hand: PushDetector() for hand in HANDS}
-        self.point = {direction: HoldTrigger(POINT_HOLD) for direction in POINT_GESTURE}
-        self._point_seen: dict[str, int] = {}
+        # 자세 유지 제스처 id → 발동 트리거
+        self._pose_triggers = {
+            "palm": self.trigger,
+            **{g: HoldTrigger(POINT_HOLD) for g in POINT_GESTURE.values()},
+            **{g: HoldTrigger(POINT_HOLD) for g in TWO_POINT_GESTURE.values()},
+        }
+        self._pose_seen: dict[str, int] = {}
         self._held: dict[str, tuple[actions.Action, keys.KeyCombo]] = {}  # 누르고 있는 키 (제스처 id → 동작, 키)
         self._cap: cv2.VideoCapture | None = None
         self._landmarker: vision.HandLandmarker | None = None
@@ -185,10 +193,9 @@ class Engine:
 
     def _reset_detectors(self) -> None:
         self.release_keys()
-        self.trigger.reset()
         for detector in self.push.values():
             detector.reset()
-        for trigger in self.point.values():
+        for trigger in self._pose_triggers.values():  # 손바닥 트리거 포함
             trigger.reset()
 
     def step(self) -> StepResult:
@@ -224,6 +231,7 @@ class Engine:
                     state,
                     hand_size_px(image_pts, w, h),
                     pointing_direction(state, image_pts, w, h),
+                    pointing_direction(state, image_pts, w, h, fingers=2),
                 )
             )
             log.debug("%s fingers=%s bends=%s", top.category_name, state.extended, [round(b) for b in state.bends])
@@ -232,34 +240,38 @@ class Engine:
 
         bindings = self.bindings
         events: list[str] = []
-        palm = any(
-            hand.state.is_open_palm and (not self.cfg.require_upright or is_upright(hand.image_pts)) for hand in hands
-        )
-        if self.trigger.update(now_ms, palm):
-            events.append("palm")
-
         for label, detector in self.push.items():
             # 같은 라벨의 손이 둘 잡히면 큰 쪽(카메라에 가까운 손)을 쓴다
             fists = [hand.size_px for hand in hands if hand.label == label and is_fist(hand.state)]
             if detector.update(now_ms, max(fists) if fists else None):
                 events.append(PUSH_GESTURE[label])
 
-        events += self._update_pointing(now_ms, hands, bindings)
+        events += self._update_poses(now_ms, self._poses(hands), bindings)
         self._dispatch(events, bindings)
         return StepResult(now_ms, frame, hands, events)
 
-    def _update_pointing(self, now_ms: int, hands: list[HandObs], bindings: Bindings) -> list[str]:
-        """가리키기 발동 제스처를 반환하고, 가리키기를 멈췄거나 설정이 바뀐 제스처의 키를 뗀다."""
+    def _poses(self, hands: list[HandObs]) -> dict[str, bool]:
+        """자세 유지 제스처 id → 이번 프레임에 그 자세가 보이는지."""
+        palm = any(
+            hand.state.is_open_palm and (not self.cfg.require_upright or is_upright(hand.image_pts)) for hand in hands
+        )
+        return {
+            "palm": palm,
+            **{g: any(hand.pointing == d for hand in hands) for d, g in POINT_GESTURE.items()},
+            **{g: any(hand.two_pointing == d for hand in hands) for d, g in TWO_POINT_GESTURE.items()},
+        }
+
+    def _update_poses(self, now_ms: int, poses: dict[str, bool], bindings: Bindings) -> list[str]:
+        """발동한 자세 제스처를 반환하고, 자세를 풀었거나 설정이 바뀐 제스처의 키를 뗀다."""
         events: list[str] = []
-        for direction, trigger in self.point.items():
-            gesture = POINT_GESTURE[direction]
-            active = any(hand.pointing == direction for hand in hands)
+        for gesture, trigger in self._pose_triggers.items():
+            active = poses[gesture]
             if active:
-                self._point_seen[gesture] = now_ms
+                self._pose_seen[gesture] = now_ms
             if trigger.update(now_ms, active):
                 events.append(gesture)
             elif gesture in self._held and (
-                now_ms - self._point_seen.get(gesture, now_ms) > POINT_RELEASE_MS
+                now_ms - self._pose_seen.get(gesture, now_ms) > POSE_RELEASE_MS
                 or bindings.get(gesture) != self._held[gesture][0]
             ):
                 self._release(gesture)
@@ -270,7 +282,7 @@ class Engine:
             action = bindings.get(gesture, {"type": "none"})
             log.info("제스처 %s → %s", GESTURES[gesture], actions.describe(action))
             try:
-                if gesture in POINT_GESTURE.values() and action["type"] == "key":
+                if gesture in self._pose_triggers and action["type"] == "key":
                     self._hold(gesture, action)
                 else:
                     actions.perform(action, dry_run=self.cfg.dry_run)

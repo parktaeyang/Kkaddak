@@ -28,7 +28,7 @@ import pytest  # noqa: E402
 
 from kkaddak import actions  # noqa: E402
 from kkaddak.config import DEFAULT_BINDINGS  # noqa: E402
-from kkaddak.engine import POINT_HOLD, POINT_RELEASE_MS, Engine  # noqa: E402
+from kkaddak.engine import POINT_HOLD, POSE_RELEASE_MS, Engine  # noqa: E402
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def run(engine, frames, start=0, step_ms=33):
     t = start
     for direction in frames:
         hands = [pointing(direction)] if direction else []
-        engine._dispatch(engine._update_pointing(t, hands, engine.bindings), engine.bindings)
+        engine._dispatch(engine._update_poses(t, engine._poses(hands), engine.bindings), engine.bindings)
         t += step_ms
     return t
 
@@ -65,7 +65,7 @@ def test_point_holds_key_until_pointing_stops(keylog):
     assert keylog == [("down", "left")]
     t = run(e, frames_for(1000, "left"), start=t)  # 계속 가리키는 동안은 누른 채
     assert keylog == [("down", "left")]
-    run(e, frames_for(POINT_RELEASE_MS + 50, None), start=t)
+    run(e, frames_for(POSE_RELEASE_MS + 50, None), start=t)
     assert keylog == [("down", "left"), ("up", "left")]
 
 
@@ -95,5 +95,36 @@ def test_binding_change_releases_held_key(keylog):
 def test_non_key_action_on_point_runs_once(keylog):
     e = Engine(bindings={**DEFAULT_BINDINGS, "point_left": {"type": "mission_control"}})
     t = run(e, frames_for(POINT_HOLD.hold_ms, "left"))
-    run(e, frames_for(POINT_RELEASE_MS + 50, None), start=t)
+    run(e, frames_for(POSE_RELEASE_MS + 50, None), start=t)
     assert keylog == [("perform", "mission_control")]
+
+
+@pytest.mark.parametrize("direction", ["up", "down"])
+def test_vertical_point_holds_arrow_key(keylog, direction):
+    e = Engine()
+    t = run(e, frames_for(POINT_HOLD.hold_ms, direction))
+    run(e, frames_for(POSE_RELEASE_MS + 50, None), start=t)
+    assert keylog == [("down", direction), ("up", direction)]
+
+
+def test_palm_holds_space_while_raised(keylog, monkeypatch):
+    e = Engine()
+    raised = {"on": True}
+    monkeypatch.setattr(e, "_poses", lambda hands: {g: g == "palm" and raised["on"] for g in e._pose_triggers})
+    t = run(e, ["x"] * 20)  # 660ms 손바닥 유지 (hands 내용은 _poses가 무시)
+    assert keylog == [("down", "space")]
+    raised["on"] = False
+    run(e, ["x"] * 8, start=t)
+    assert keylog == [("down", "space"), ("up", "space")]
+
+
+@pytest.mark.parametrize("direction, key", [("up", "pageup"), ("down", "pagedown")])
+def test_two_finger_holds_page_key(keylog, direction, key):
+    e = Engine()
+    two = HandObs("Right", 0.9, pointing(None).image_pts, pointing(None).state, 100.0, None, direction)
+    t = 0
+    for _ in range(POINT_HOLD.hold_ms // 33 + 2):
+        e._dispatch(e._update_poses(t, e._poses([two]), e.bindings), e.bindings)
+        t += 33
+    run(e, frames_for(POSE_RELEASE_MS + 50, None), start=t)
+    assert keylog == [("down", key), ("up", key)]

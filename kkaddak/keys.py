@@ -35,7 +35,7 @@ MODIFIER_ALIASES = {
 MODIFIER_SYMBOLS = {"ctrl": "⌃", "alt": "⌥", "shift": "⇧", "cmd": "⌘"}
 KEY_SYMBOLS = {
     "return": "↩", "tab": "⇥", "space": "Space", "delete": "⌫", "escape": "Esc", "forwarddelete": "⌦",
-    "left": "←", "right": "→", "up": "↑", "down": "↓",
+    "left": "←", "right": "→", "up": "↑", "down": "↓", "pageup": "PageUp", "pagedown": "PageDown",
 }  # fmt: skip
 
 
